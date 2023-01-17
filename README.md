@@ -29,11 +29,11 @@ TO DO:
 2. Complete review of existing R files used for data collection and processing and update techniques using Python.
 3. Update indicator words/phrases for use in digital-savviness evaluation.
 4. Implement process for evaluating tech-savviness:
-  * Pull biographies from SEC's EDGAR database
-  * Utilize Stanza's NLP library to parse biographies
-  * Decide on thresholds for NLP evaluation and assign flag (tech-savvy or not tech-savvy) to each company being investigated
-  * Map NLP evaluation to financial performance indicators 
-  * Use T-test to determine if significant financial performance difference exists between the two groups.
+    * Pull biographies from SEC's EDGAR database
+    * Utilize Stanza's NLP library to parse biographies
+    * Decide on thresholds for NLP evaluation and assign flag (tech-savvy or not tech-savvy) to each company being investigated
+    * Map NLP evaluation to financial performance indicators 
+    * Use T-test to determine if significant financial performance difference exists between the two groups.
 5. Generate data visuals (word cloud, histogram, box plots, etc...) to demonstrate findings
 5. Organize and detail quantitative and visual results in academic briefing in LATEX
 
