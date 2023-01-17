@@ -1,4 +1,4 @@
-# Natural Language Processing of Baord of Director Biographies
+# Natural Language Processing of Board of Director Biographies
 
 Digital savviness among board of directors has been linked to financial success of several publicy-listed companies in a study done in 2017. Due to recent advances in technology, it has become clear that the indicators of potentially tech-savvy directors has changed which has prompted a replicate study which will be documented here. 
 
