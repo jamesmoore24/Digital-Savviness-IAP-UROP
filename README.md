@@ -4,7 +4,7 @@ Digital savviness among board of directors has been linked to financial success 
 
 ## About:
 
-Uses popular python data processing packages such as ```pandas```, ```numpy``` and ```mathplotlib``` through the ```scipy``` distribution to carry out data cleaning, analysis and visualization. Uses [COMPUSTAT](https://www.spglobal.com/marketintelligence/en/?product=compustat-research-insight) in combination with [Financial Modeling Prep's API](https://site.financialmodelingprep.com/developer/docs/) and the [Apperate API from IEX Cloud](https://iexcloud.io/docs/) to obtain financial performance information of publicly-traded companies. Uses ```stanza``` [(Stanford NLP Library)](https://stanfordnlp.github.io/stanza/) to parse biography and assess individual's tech savviness. Also uses the new [EDGAR API](https://www.sec.gov/edgar/sec-api-documentation) to search company submitted SEC files which will be used to identify schedule 14A proxies which contain board of director biographies.
+Uses popular python data processing packages such as ```pandas```, ```numpy``` and ```mathplotlib``` through the ```scipy``` distribution to carry out data cleaning, analysis and visualization. Uses [COMPUSTAT](https://www.spglobal.com/marketintelligence/en/?product=compustat-research-insight) in combination with [Financial Modeling Prep's API](https://site.financialmodelingprep.com/developer/docs/) and the [Apperate API from IEX Cloud](https://iexcloud.io/docs/) to obtain financial performance information of publicly-traded companies. Uses [```NLTK```](https://www.nltk.org/) to parse biography and assess individual's tech savviness. Also uses the new [EDGAR API](https://www.sec.gov/edgar/sec-api-documentation) to search company submitted SEC files which will be used to identify director names from form 4 filings and schedule 14A proxies which contain board of director biographies
 
 ---
 
@@ -23,19 +23,20 @@ Need to determine whether digital-savviness among a board of directors at a give
 ### Approach:
 
 COMPLETED:
-
-TO DO:
 1. Connect to, investigate, and test API data vendors that they are sending complete data.
 2. Complete review of existing R files used for data collection and processing and update techniques using Python.
-3. Update indicator words/phrases for use in digital-savviness evaluation.
-4. Implement process for evaluating tech-savviness:
+3. Implement process for evaluating tech-savviness:
     * Pull biographies from SEC's EDGAR database
-    * Utilize Stanza's NLP library to parse biographies
+    * Utilize TLNK's NLP library to parse biographies
+
+TO DO:
+1. Update indicator words/phrases for use in digital-savviness evaluation.
+2. Implement process for evaluating tech-savviness:
     * Decide on thresholds for NLP evaluation and assign flag (tech-savvy or not tech-savvy) to each company being investigated
     * Map NLP evaluation to financial performance indicators 
     * Use T-test to determine if significant financial performance difference exists between the two groups.
-5. Generate data visuals (word cloud, histogram, box plots, etc...) to demonstrate findings
-5. Organize and detail quantitative and visual results in academic briefing in LATEX
+3. Generate data visuals (word cloud, histogram, box plots, etc...) to demonstrate findings
+4. Organize and detail quantitative and visual results in academic briefing in LATEX
 
 
 ### Takeaways:
