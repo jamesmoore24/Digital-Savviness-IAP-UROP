@@ -1,15 +1,16 @@
 import requests as r
 from bs4 import BeautifulSoup
 import pandas as pd
+import numpy as np
 import time
 from sqlalchemy import create_engine
 from datetime import datetime, timedelta
 import nltk
 from nltk.stem import PorterStemmer
-from nltk.tokenize import sent_tokenize
+from nltk.tokenize import *
 from dotenv import load_dotenv
 import os
-
+from fuzzywuzzy import fuzz
 
 def get_fin_data():
     """
@@ -114,7 +115,7 @@ def get_directors(data_directory):
 
         # Get the current date and time 3 years ago to this day
         now = datetime.now()
-        three_years_ago = now - timedelta(days=365*3)
+        two_years_ago = now - timedelta(days=365*2)
 
         #Initialize API call
         headers = {
@@ -132,8 +133,8 @@ def get_directors(data_directory):
                 #only allowed 10 requests/sec
                 time.sleep(0.1)
 
-                #need to stop search because we don't want to search forms longer than 3 years old
-                if datetime.strptime(date, "%Y-%m-%d") < three_years_ago:
+                #need to stop search because we don't want to search forms older than 3 years old
+                if datetime.strptime(date, "%Y-%m-%d") < two_years_ago:
                     if not def14a_count:
                         print(f"No recent filings for {int(row['cik'])}")
                         no_recent_filings += 1
@@ -197,7 +198,9 @@ def get_biographies(cik, directors):
     headers = {
         "User-Agent": "jmoore1@mit.edu"
     }
-    url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+    zeroes = "0" * (10-len(str(int(cik))))
+    url = f"https://data.sec.gov/submissions/CIK{zeroes}{int(cik)}.json"
+    
     response = r.get(url, headers=headers)
     info = response.json()['filings']['recent']
 
@@ -214,7 +217,7 @@ def get_biographies(cik, directors):
     for access_num, file, form, date in zip(info['accessionNumber'], info['primaryDocument'], info['form'], info['filingDate']):
         if form == 'DEF 14A':
             #create url and get a response
-            f_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{access_num.replace('-', '')}/{file}"
+            f_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{access_num.replace('-', '')}/{file}"
             response = r.get(f_url, headers=headers)
 
             #make into html object and parse text using tokenizer
@@ -227,6 +230,7 @@ def get_biographies(cik, directors):
             
             #dictionary used to relate director to their respective highest-ranked biography
             director_bios = {}
+            savvy = 0
             for director in directors_l:
                 #create list of sentences found in data structure: (sentence, rank)
                 sentence_record = []
@@ -251,13 +255,150 @@ def get_biographies(cik, directors):
                 #sort list by second value in tuple
                 sentence_record.sort(key = lambda x: x[1], reverse=True)
                 #add director name (FIRST LAST) with sentence into dictionary
+                
+
                 director_bios[f"{director[1]} {director[0]}"] = sentence_record[0][0]
 
             #return dictionary of names and related biographies for a single company
             return director_bios
+    
+def find_savvy(fin_data, most_data, least_data):
+    """
+    Parameters:
+        - fin_data: local filename for financial records for each company
+        - most_data: local filename for the most indicative words for tech-savviness
+        - least_data: local filename for the least indicative words for tech-savviness
+    Returns:
+        - None
+    Purpose:
+        - Parse director biographies and determine which directors are savvy or not based on keywords
+        - Put data into PostgreSQL database for extraction and further analysis
+
+    """
+
+    engine = create_engine(os.environ['DB_URI'])
+    
+    df = pd.read_csv('csv_files/data_one_year_final.csv')
+    with open('txt_files/most_significant_indicators.txt', 'r') as file:
+        # Read all lines from the file into a list
+        lines = file.readlines()
+    # Remove the newline character ('\n') from each line and create a list
+    most_sig = [line.rstrip('\n') for line in lines]
+
+    with open('txt_files/least_significant_indicators.txt', 'r') as file:
+        # Read all lines from the file into a list
+        lines = file.readlines()
+    # Remove the newline character ('\n') from each line and create a list
+    least_sig = [line.rstrip('\n') for line in lines]
+
+    engine = create_engine(os.environ['DB_URI'])
+    stemmer = PorterStemmer()
+
+    for ix, row in df.iloc[722:, :].iterrows():
+        try:
+            bios = get_biographies(row['CIK'], row['Directors'])
+            savvy = 0
+            for bio in bios:
+                flag_savvy = False
+                for phrase in most_sig:
+                    #create window with the same length as the phrase to search for the indicator phrases
+                    if fuzz.partial_token_sort_ratio(' '.join([stemmer.stem(word) for word in phrase]), bio) > 66:
+                        flag_savvy = True
+                                
+                if not flag_savvy:
+                    count = 0
+                    for phrase in least_sig:
+                        if fuzz.partial_token_sort_ratio(' '.join([stemmer.stem(word) for word in phrase]), bio) > 66:
+                            print(phrase)
+                            if count >= 1:
+                                flag_savvy = True
+                                break
+                            else:
+                                count += 1
+                savvy += flag_savvy
+                
+            print("Progress:", ix / len(df.index), "Savvy:", savvy, "/", len(row['Directors'].split(';')[:-1]))
+            # need to output to database
+            df_row = pd.DataFrame([[row['CIK'], row['GVKEY'], row['NAICS'], row['MCAP'], row['REVT'], row['ROA'], row['NPM'], savvy, len(row['Directors'].split(';')[:-1])]], columns=['CIK', 'GVKEY', 'NAICS', 'MCAP', 'REVT', 'ROA', 'NPM', 'NUM_SAVVY', 'NUM_DIR'])
+            df_row.to_sql('savvy_test_0', engine, if_exists='append', index=False)
+        except:
+            print("Error for", row['CIK'])
+            continue
+
+def analyze_data():
+    """
+    Purpose:
+        - Categorize each company into its respective NAICS industry (first 2 digits of NAICS code)
+        - Perform industry-wide and overall analysis of key indicator ratios (ROE, ROA, and NPM) and whether there is a
+        significant different in those ratios between companies that are savvy and those that are not
+            - Will use Grubb's test to determine outliers in ROE, ROA and NPM data
+            - Note that financial data is latest possible data for all categories
+        - Can use a Welch's T-test to determine whether there exists a significant difference between two types
+        - Eliminate companies with less than 3 directors
+            - Then eliminate with less than 6 directors
+    """
+    df = pd.read_csv('final.csv')
+    savvy = not_savvy = []
+
+    savvy.append(0)
+    print(savvy, not_savvy)
+
 
 if __name__ == '__main__':
-    None
+    # need to add roe
+    engine = create_engine(os.environ['DB_URI'])
+    df_final = pd.read_sql('savvy_test_0', engine)
+
+    # create dictionary with all gvkey's and their latest roe value
+    df_roe = pd.read_csv('csv_files/company_roe.csv')
+    roe_relate = dict()
+    for ix, row in df_roe.iterrows():
+        print("Progress:", ix/len(df_roe.index))
+        if row['gvkey'] not in roe_relate:
+            roe_relate[row['gvkey']] = (row['roe'], row['public_date'])
+        else:
+            if row['public_date'] > roe_relate[row['gvkey']][1]:
+                roe_relate[row['gvkey']] = (row['roe'], row['public_date'])
+
+    # go through db and add to dataframe and export as csv
+    roe_final = []
+
+    for ix, row in df_final.iterrows():
+        print("Progress:", ix/len(df_roe.index))
+        if row['GVKEY'] in roe_relate:
+            # add the ROE to the related GKVEY
+            roe_final.append(roe_relate[row['GVKEY']][0])
+        else:
+            # else just append a NaN variable
+            roe_final.append(float('nan'))
+            print('Couldn\'t find the gvkey for', row['GVKEY'])
+    
+    df_final['ROE'] = roe_final
+
+    df_final.to_csv('test')
+
+
+
+    
+
+
+
+
+
+
+
+
+
+    # This is code for taking data from the data_one_year_final and parsing which directors are savvy and adding up the results
+    
+
+
+
+
+
+
+
+
 
 
     
