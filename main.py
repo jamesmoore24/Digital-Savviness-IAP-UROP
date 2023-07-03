@@ -1,8 +1,11 @@
+from unittest import TextTestRunner
 import requests as r
 from bs4 import BeautifulSoup
 import pandas as pd
 import numpy as np
+import scipy.stats as stats
 import time
+from outliers import smirnov_grubbs as grubbs
 from sqlalchemy import create_engine
 from datetime import datetime, timedelta
 import nltk
@@ -273,7 +276,6 @@ def find_savvy(fin_data, most_data, least_data):
     Purpose:
         - Parse director biographies and determine which directors are savvy or not based on keywords
         - Put data into PostgreSQL database for extraction and further analysis
-
     """
 
     engine = create_engine(os.environ['DB_URI'])
@@ -325,8 +327,10 @@ def find_savvy(fin_data, most_data, least_data):
             print("Error for", row['CIK'])
             continue
 
-def analyze_data():
+def analyze_data(fin_metric):
     """
+    Parameters:
+        - fin_metric: the financial metric the Welch T-test is to be used on
     Purpose:
         - Categorize each company into its respective NAICS industry (first 2 digits of NAICS code)
         - Perform industry-wide and overall analysis of key indicator ratios (ROE, ROA, and NPM) and whether there is a
@@ -338,55 +342,29 @@ def analyze_data():
             - Then eliminate with less than 6 directors
     """
     df = pd.read_csv('final.csv')
-    savvy = not_savvy = []
 
-    savvy.append(0)
-    print(savvy, not_savvy)
+    outlier_ix = grubbs.max_test_indices(df[fin_metric], alpha=0.5)
 
+    savvy = []
+    not_savvy = []
+    savvy_no = []
+    not_savvy_no = []
 
+    # build the lists of data for specified type of financial metric
+    for ix, row in df.iterrows():
+        if row['NUM_SAVVY'] >= 3:
+            savvy.append(row[fin_metric])
+            if ix not in outlier_ix:
+                savvy_no.append(row[fin_metric])
+        else:
+            not_savvy.append(row[fin_metric])
+            if ix not in outlier_ix:
+                not_savvy_no.append(row[fin_metric])
+
+    print(stats.ttest_ind(savvy, not_savvy, equal_var = True))
+    
 if __name__ == '__main__':
-    # need to add roe
-    engine = create_engine(os.environ['DB_URI'])
-    df_final = pd.read_sql('savvy_test_0', engine)
-
-    # create dictionary with all gvkey's and their latest roe value
-    df_roe = pd.read_csv('csv_files/company_roe.csv')
-    roe_relate = dict()
-    for ix, row in df_roe.iterrows():
-        print("Progress:", ix/len(df_roe.index))
-        if row['gvkey'] not in roe_relate:
-            roe_relate[row['gvkey']] = (row['roe'], row['public_date'])
-        else:
-            if row['public_date'] > roe_relate[row['gvkey']][1]:
-                roe_relate[row['gvkey']] = (row['roe'], row['public_date'])
-
-    # go through db and add to dataframe and export as csv
-    roe_final = []
-
-    for ix, row in df_final.iterrows():
-        print("Progress:", ix/len(df_roe.index))
-        if row['GVKEY'] in roe_relate:
-            # add the ROE to the related GKVEY
-            roe_final.append(roe_relate[row['GVKEY']][0])
-        else:
-            # else just append a NaN variable
-            roe_final.append(float('nan'))
-            print('Couldn\'t find the gvkey for', row['GVKEY'])
-    
-    df_final['ROE'] = roe_final
-
-    df_final.to_csv('test')
-
-
-
-    
-
-
-
-
-
-
-
+    None
 
 
     # This is code for taking data from the data_one_year_final and parsing which directors are savvy and adding up the results
