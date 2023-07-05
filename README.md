@@ -4,7 +4,7 @@ Digital savviness among board of directors has been linked to financial success 
 
 ## About:
 
-Uses popular python data processing packages such as ```pandas```, ```numpy``` and ```mathplotlib``` through the ```scipy``` distribution to carry out data cleaning, analysis and visualization. Uses [COMPUSTAT](https://www.spglobal.com/marketintelligence/en/?product=compustat-research-insight) to obtain financial performance information of publicly-traded companies. Uses [```NLTK```](https://www.nltk.org/) and SeetGeek's [```fuzzywuzzy package```](https://github.com/seatgeek/fuzzywuzzy) to parse biography and assess individual's tech savviness. Also uses the new [EDGAR API](https://www.sec.gov/edgar/sec-api-documentation) to search company submitted SEC files which will be used to identify director names from form 4 filings and schedule 14A proxies which contain board of director biographies
+Uses popular python data processing packages such as ```pandas```, ```numpy``` and ```mathplotlib``` through the ```scipy``` distribution to carry out data cleaning, analysis and visualization. Uses [COMPUSTAT](https://www.spglobal.com/marketintelligence/en/?product=compustat-research-insight) to obtain financial performance information of publicly-traded companies. Uses [```NLTK```](https://www.nltk.org/) and SeetGeek's [```fuzzywuzzy```](https://github.com/seatgeek/fuzzywuzzy) package to parse biography and assess individual's tech savviness. Also uses the new [EDGAR API](https://www.sec.gov/edgar/sec-api-documentation) to search company submitted SEC files which will be used to identify director names from form 4 filings and schedule 14A proxies which contain board of director biographies
 
 ---
 
