@@ -480,8 +480,7 @@ class Main():
 
 
 if __name__ == '__main__':
-    #need to process data in df_rev to have rev change YoY 2021-2022
-    Main().process_data('csv_files/final.csv')
+    None
 
     
     
