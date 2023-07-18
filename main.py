@@ -7,6 +7,7 @@ import numpy as np
 import scipy.stats as stats
 from collections import defaultdict
 import json
+from datetime import datetime
 
 #Packages for API calls and database connection
 import requests as r
@@ -351,7 +352,7 @@ class Main():
             - JSON file with processed data
         """
         
-        def create_final_rep(self, data_rep: dict, savvy: pd.DataFrame, not_savvy: pd.DataFrame):
+        def create_final_rep(data_rep: dict, savvy: pd.DataFrame, not_savvy: pd.DataFrame):
             """
             Parameters:
                 - data_rep: Dictionary that represents the JSON of the final calculated data
@@ -363,7 +364,7 @@ class Main():
                 - data_rep which is the final JSON representation of processed data for output
             """
 
-            def create_stats_simple(self, group_data: pd.DataFrame):
+            def create_stats_simple(group_data: pd.DataFrame):
                 """
                 Parameters:
                     - a DataFrame which represents the financial data for all companies in a NAICS group
@@ -384,17 +385,20 @@ class Main():
                         'NPM mean': np.mean(group_data['NPM']),
                         'NPM median': np.median(group_data['NPM']),
                         'NPM standard deviation': np.std(group_data['NPM']),
+                        'REVC mean': np.mean(group_data['REVCHANGE']),
+                        'REVC median': np.median(group_data['REVCHANGE']),
+                        'REVC standard deviation': np.std(group_data['REVCHANGE']),
                         'MCAP mean': np.mean(group_data['MCAP']),
                         'MCAP median': np.median(group_data['MCAP']),
                         'MCAP standard deviation': np.std(group_data['MCAP']),
                         'REVT mean': np.mean(group_data['REVT']),
                         'REVT median': np.median(group_data['REVT']),
                         'REVT standard deviation': np.std(group_data['REVT'])}
-                except:
-                    print("Unable to create simple stats")
+                except Exception as e:
+                    print("Unable to create simple stats", e)
                     return None
                 
-            def create_stats_ttest(self, group_data: dict):
+            def create_stats_ttest(group_data: dict):
                 """
                 Parameters:
                     - group_data: dict which holds raw and stats about savvy and not savvy information
@@ -409,14 +413,24 @@ class Main():
                     npm = stats.ttest_ind(group_data['savvy_raw']['NPM'], group_data['not_savvy_raw']['NPM'], equal_var = True)
                     mcap = stats.ttest_ind(group_data['savvy_raw']['MCAP'], group_data['not_savvy_raw']['MCAP'], equal_var = True)
                     revt = stats.ttest_ind(group_data['savvy_raw']['REVT'], group_data['not_savvy_raw']['REVT'], equal_var = True)
+                    revc = stats.ttest_ind(group_data['savvy_raw']['REVCHANGE'], group_data['not_savvy_raw']['REVCHANGE'], equal_var = True)
                     return {'ROA t-statistic': roa[0], 'ROA p-value': roa[1],
                             'ROE t-statistic': roe[0], 'ROE p-value': roe[1],
                             'NPM t-statistic': npm[0], 'NPM p-value': npm[1],
                             'MCAP t-statistic': mcap[0], 'MCAP p-value': mcap[1],
-                            'REVT t-statistic': revt[0], 'REVT p-value': revt[1]}
+                            'REVT t-statistic': revt[0], 'REVT p-value': revt[1],
+                            'REVC t-statistic': revc[0], 'REVC p-value': revc[1],}
                 except:
                     return None
                 
+            #CALCULATE THE OVERALL STATS
+            data_rep['OVERALL'] = defaultdict()
+            data_rep['OVERALL']['savvy'] = create_stats_simple(savvy.dropna())
+            data_rep['OVERALL']['savvy_raw'] = savvy.dropna()
+            data_rep['OVERALL']['not_savvy'] = create_stats_simple(not_savvy.dropna())
+            data_rep['OVERALL']['not_savvy_raw'] = not_savvy.dropna()
+            data_rep['OVERALL']['t_stats'] = create_stats_ttest(data_rep['OVERALL'])
+
             savvy = savvy.groupby(savvy['NAICS'].astype(str).str[:2])
             not_savvy = not_savvy.groupby(not_savvy['NAICS'].astype(str).str[:2])
             for group_name, group_data in savvy:
@@ -445,21 +459,35 @@ class Main():
         savvy = df[df['NUM_SAVVY'] >= 3] 
         # create a boolean mask of rows which should be included
         z_scores = np.abs(stats.zscore(savvy)) < 3 
+        mask = z_scores == False
+        print("Number of Outliers for savvy", mask.sum().sum())
         #apply the mask
         savvy = savvy[z_scores]
 
         not_savvy = df[df['NUM_SAVVY'] < 3]
         z_scores = np.abs(stats.zscore(not_savvy)) < 3 
+        mask = z_scores == False
+        print("Number of Outliers for not_savvy", mask.sum().sum())
         not_savvy = not_savvy[z_scores]
 
-        data_rep = self.create_final_rep(data_rep, savvy, not_savvy)
+        print("Total number of companies is", len(savvy.dropna().index) + len(not_savvy.dropna().index))
+
+        data_rep = create_final_rep(data_rep, savvy, not_savvy)
+        
         
         with open('result.json', 'w') as fp:
             json.dump(data_rep, fp, indent=2)
 
 
 if __name__ == '__main__':
-    None
+    #need to process data in df_rev to have rev change YoY 2021-2022
+    Main().process_data('csv_files/final.csv')
+
+    
+    
+
+
+
     
 
 
