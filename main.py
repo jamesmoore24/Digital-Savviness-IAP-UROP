@@ -614,6 +614,5 @@ class Main():
 
 
 if __name__ == '__main__':
-    Main().process_data('csv_files/final_data.csv')
-
+    None
     
