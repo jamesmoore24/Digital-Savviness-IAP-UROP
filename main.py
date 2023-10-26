@@ -357,7 +357,6 @@ class Main():
 
         # Save the word freq json
         sorted_word_frequencies = dict(sorted(word_frequencies.items(), key=lambda item: item[1], reverse=True))
-        print(sorted_word_frequencies)
         with open("word_freq.json", "w") as json_file:
             json.dump(sorted_word_frequencies, json_file, indent=4)
 
@@ -546,7 +545,6 @@ class Main():
             return data_rep
 
         df = pd.read_csv(file_path).dropna()
-        print("HEREE", len(df.index))
         data_rep = defaultdict()
         
         #filter data for savvy rows (companies only)
@@ -572,9 +570,6 @@ class Main():
         
         # create the name list representation
         naics_name = pd.read_csv('csv_files/cik_to_name.csv')
-        df_no_duplicates = not_savvy.drop_duplicates(subset='CIK', keep='first')
-        print(len(pd.merge(not_savvy, naics_name, on='CIK', how='inner')['COMPANY_NAME'].index))
-        print("MATCH", len(df_no_duplicates.index))
         name_rep = {
             'savvy_name_list': pd.merge(savvy, naics_name, on='CIK', how='inner')['COMPANY_NAME'].tolist(),
             'not_savvy_name_list': pd.merge(not_savvy, naics_name, on='CIK', how='inner')['COMPANY_NAME'].tolist()
