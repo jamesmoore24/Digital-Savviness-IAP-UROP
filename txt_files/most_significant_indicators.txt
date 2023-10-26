@@ -1,41 +1,30 @@
-AI
-AI/ML
-algorithm
-api
-automation
-cloud computing
-cyber
-data
-digital assets
-digital strategy
-digital technologies
-digital transformation
-digitalization
-digitization
-disruptive technologies
-generative AI
-information officer
-information technology
-integrated solution
-internet
-internet of things
-it background
-it experience
-it professional
+Digital transformation
+Cloud
+Cyber
+artificial intelligence
 Machine learning
-ML/AI
-nanotechnology
-omnichannel
-software
-software as a service
-system integration
-tech executive
-tech professional
-technological
-technology
-technology background
-technology based company
-technology company
-technology experience
-technology platform
-web
+data
+Internet of Things
+Edge computing
+Xaas
+digital strategy
+internet of things
+platform as a service (Paas)
+integrated solution
+ecosystem
+digital platform
+Blockchain
+Fintech
+Regtech
+Agritech
+legaltech
+medtech
+tech
+Software as a service
+Saas
+Digital
+Technology strategy
+Technology ethics
+Digital payments
+Identity management
+Privacy technology

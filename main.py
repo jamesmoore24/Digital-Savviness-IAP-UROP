@@ -7,7 +7,9 @@ import numpy as np
 import scipy.stats as stats
 from collections import defaultdict
 import json
+import csv
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 #Packages for API calls and database connection
 import requests as r
@@ -145,47 +147,40 @@ class Main():
             zeroes = "0" * (10-len(str(int(row['CIK']))))
             url = f"https://data.sec.gov/submissions/CIK{zeroes}{int(row['CIK'])}.json"
 
-            try:
-                #get the response and index to recent filings in json
-                response = r.get(url, headers=headers)
-                info = response.json()['filings']['recent']
-                
-                for access_num, file, form, date in zip(info['accessionNumber'], info['primaryDocument'], info['form'], info['filingDate']):
-                    #only allowed 10 requests/sec
-                    time.sleep(0.1)
+            
+            #get the response and index to recent filings in json
+            response = r.get(url, headers=headers)
+            info = response.json()['filings']['recent']
+            
+            for access_num, file, form, date in zip(info['accessionNumber'], info['primaryDocument'], info['form'], info['filingDate']):
+                #only allowed 10 requests/sec
+                time.sleep(0.1)
 
-                    #need to stop search because we don't want to search forms older than 3 years old
-                    if datetime.strptime(date, "%Y-%m-%d") < two_years_ago:
-                        if not def14a_count:
-                            print(f"No recent filings for {int(row['cik'])}")
-                            no_recent_filings += 1
-                        break
-                    #don't check too many form 4's
-                    elif count > 30:
-                        break
-                    #analyze the form
-                    elif form == "4":
-                        #initialize unique file url
-                        f_url = f"https://www.sec.gov/Archives/edgar/data/{int(row['CIK'])}/{access_num.replace('-', '')}/{file}"
-                        try:
-                            f_response = r.get(f_url, headers=headers)
-                            #Code to scrape directors names from FORM 4
-                            soup = BeautifulSoup(f_response.text, 'html.parser')
-                            name = soup.find_all("table")[4].find_all("a")[0].text
-                            #find whether or not there's the 'X' next to the 'Director' option in the form 4
-                            if soup.find_all("table")[4].find_all("table")[5].find_all("td")[0].text == 'X' and name not in d_set:
-                                print(name, "Director added")
-                                directors += name.lower() + ';'
-                                d_set.add(name)
-                            count += 1
-                        except Exception as e:
-                            #Can't read the html file
-                            invalid_html = 1
-                            print("Failed to load url! Exception: ", repr(e))
-            except Exception as e:
-                #couldn't access the link
-                no_data = 1
-                print(f"Couldn't retrive CIK data for {int(row['CIK'])}", repr(e))
+                #need to stop search because we don't want to search forms older than 3 years old
+                if datetime.strptime(date, "%Y-%m-%d") < two_years_ago:
+                    if not def14a_count:
+                        print(f"No recent filings for {int(row['cik'])}")
+                        no_recent_filings += 1
+                    break
+                #don't check too many form 4's
+                elif count > 30:
+                    break
+                #analyze the form
+                elif form == "4":
+                    #initialize unique file url
+                    f_url = f"https://www.sec.gov/Archives/edgar/data/{int(row['CIK'])}/{access_num.replace('-', '')}/{file}"
+               
+                    f_response = r.get(f_url, headers=headers)
+                    #Code to scrape directors names from FORM 4
+                    soup = BeautifulSoup(f_response.text, 'html.parser')
+                    name = soup.find_all("table")[4].find_all("a")[0].text
+                    #find whether or not there's the 'X' next to the 'Director' option in the form 4
+                    if soup.find_all("table")[4].find_all("table")[5].find_all("td")[0].text == 'X' and name not in d_set:
+                        print(name, "Director added")
+                        directors += name.lower() + ';'
+                        d_set.add(name)
+                    count += 1
+            
             
             #create new DF, get rid of index column and export to db
             df = row.to_frame().T
@@ -281,12 +276,11 @@ class Main():
                 #return dictionary of names and related biographies for a single company
                 return director_bios
         
-    def find_savvy(self, fin_data: str, most_data: str, least_data: str):
+    def find_savvy(self, fin_data: str, most_data: str):
         """
         Parameters:
             - fin_data: local filename for financial records for each company
             - most_data: local filename for the most indicative words for tech-savviness
-            - least_data: local filename for the least indicative words for tech-savviness
         Returns:
             - None
         Purpose:
@@ -301,50 +295,76 @@ class Main():
         # Remove the newline character ('\n') from each line and create a list
         most_sig = [line.rstrip('\n') for line in lines]
 
-        with open(least_data, 'r') as file:
-            # Read all lines from the file into a list
-            lines = file.readlines()
-        # Remove the newline character ('\n') from each line and create a list
-        least_sig = [line.rstrip('\n') for line in lines]
-
         stemmer = PorterStemmer()
 
-        for ix, row in df.iloc[722:, :].iterrows():
+        word_frequencies = defaultdict(int)
+
+        for ix, row in df.iloc[1869:, :].iterrows():
             try:
                 bios = self.get_biographies(row['CIK'], row['Directors'])
                 savvy = 0
-                for bio in bios:
+                for director, bio in bios.items():
                     flag_savvy = False
+
                     for phrase in most_sig:
                         #create window with the same length as the phrase to search for the indicator phrases
-                        if fuzz.partial_token_sort_ratio(' '.join([stemmer.stem(word) for word in phrase]), bio) > 66:
-                            flag_savvy = True
-                                    
-                    if not flag_savvy:
-                        count = 0
-                        for phrase in least_sig:
-                            if fuzz.partial_token_sort_ratio(' '.join([stemmer.stem(word) for word in phrase]), bio) > 66:
-                                print(phrase)
-                                if count >= 1:
-                                    flag_savvy = True
-                                    break
-                                else:
-                                    count += 1
-                    savvy += flag_savvy
+                        len_phrase = len(phrase.split(' ')) # this is the number of words in the phrase
+                        bio_l = bio.split(' ')
+                        for i in range(len(bio_l) - len_phrase):
+                            phrase_check = ' '.join(bio_l[i:i + len_phrase])
+                            match_perc = fuzz.ratio(' '.join([stemmer.stem(word) for word in phrase.lower()]), phrase_check)
+                            
+                            common_mistakes = ['each', 'echo', 'date', 'rata', 'it']
+                            if match_perc > 50 and phrase_check not in common_mistakes:
+                                # add to the total number of savvy directos and move onto the next director biography
+                                print("Matched", phrase, "with", phrase_check, "at", match_perc, "% for director", director)
+                                word_frequencies[phrase] += 1
+                                savvy += 1
+                                flag_savvy = True
+                                break
+                        
+                        if flag_savvy:
+                            break
                     
                 print("Progress:", ix / len(df.index), "Savvy:", savvy, "/", len(row['Directors'].split(';')[:-1]))
                 # need to output to database
-                df_row = pd.DataFrame([[row['CIK'], row['GVKEY'], row['NAICS'], row['MCAP'], row['REVT'], row['ROA'], row['NPM'], savvy, len(row['Directors'].split(';')[:-1])]], columns=['CIK', 'GVKEY', 'NAICS', 'MCAP', 'REVT', 'ROA', 'NPM', 'NUM_SAVVY', 'NUM_DIR'])
-                df_row.to_sql('savvy_test_0', self.engine, if_exists='append', index=False)
-            except:
-                print("Error for", row['CIK'])
+                df_row = pd.DataFrame([[row['CIK'], row['GVKEY'], row['NAICS'], row['MCAP'], row['REVT'], row['ROA'], row['NPM'], row['REVCHANGE'], row['ROE'], savvy, len(row['Directors'].split(';')[:-1])]], columns=['CIK', 'GVKEY', 'NAICS', 'MCAP', 'REVT', 'ROA', 'NPM', 'REVCHANGE', 'ROE', 'NUM_SAVVY', 'NUM_DIR'])
+                df_row.to_sql('savvy_final_1', self.engine, if_exists='append', index=False)
+            except Exception as e:
+                print("Error for", row['CIK'], e)
                 continue
+        
+        #CREATE GRAPH FOR WORD FREQUENCIES
+
+        words = list(word_frequencies.keys())
+        frequencies = list(word_frequencies.values())
+
+        # Create a bar chart
+        plt.figure(figsize=(10, 6))  # Optional: Set the size of the figure
+
+        plt.bar(words, frequencies)
+
+        # Optional: Add labels and title
+        plt.xlabel("Words")
+        plt.ylabel("Frequencies")
+        plt.title("Word Frequencies")
+
+        # Optional: Rotate x-axis labels for better readability
+        plt.xticks(rotation=45)
+
+        #Save the resulting chart
+        plt.savefig('Graphs/word_freq.png')
+
+        # Save the word freq json
+        sorted_word_frequencies = dict(sorted(word_frequencies.items(), key=lambda item: item[1], reverse=True))
+        print(sorted_word_frequencies)
+        with open("word_freq.json", "w") as json_file:
+            json.dump(sorted_word_frequencies, json_file, indent=4)
 
     def process_data(self, file_path: str):
         """
         Parameters:
             - file_path: the file path to the final data
-            - fin_metric: the financial metric the Welch T-test is to be used on
         Purpose:
             - Filter each entry by a z-score of 3 (do this with a boolean mask in pandas)
             - Use stats.ttest_ind to determine significance of the two populations
@@ -352,7 +372,7 @@ class Main():
             - JSON file with processed data
         """
         
-        def create_final_rep(data_rep: dict, savvy: pd.DataFrame, not_savvy: pd.DataFrame):
+        def create_final_rep(data_rep: dict, savvy: pd.DataFrame, not_savvy: pd.DataFrame, all: pd.DataFrame):
             """
             Parameters:
                 - data_rep: Dictionary that represents the JSON of the final calculated data
@@ -376,22 +396,22 @@ class Main():
                 group_data = group_data.dropna()
                 try:
                     return {'N': len(group_data.index),
-                        'ROA mean': np.mean(group_data['ROA']),
+                        'ROA mean': np.average(group_data['ROA'], ),
                         'ROA median': np.median(group_data['ROA']),
                         'ROA standard deviation': np.std(group_data['ROA']),
-                        'ROE mean': np.mean(group_data['ROE']),
+                        'ROE mean': np.average(group_data['ROE']),
                         'ROE median': np.median(group_data['ROE']),
                         'ROE standard deviation': np.std(group_data['ROE']),
-                        'NPM mean': np.mean(group_data['NPM']),
+                        'NPM mean': np.average(group_data['NPM']),
                         'NPM median': np.median(group_data['NPM']),
                         'NPM standard deviation': np.std(group_data['NPM']),
-                        'REVC mean': np.mean(group_data['REVCHANGE']),
+                        'REVC mean': np.average(group_data['REVCHANGE']),
                         'REVC median': np.median(group_data['REVCHANGE']),
                         'REVC standard deviation': np.std(group_data['REVCHANGE']),
-                        'MCAP mean': np.mean(group_data['MCAP']),
+                        'MCAP mean': np.average(group_data['MCAP']),
                         'MCAP median': np.median(group_data['MCAP']),
                         'MCAP standard deviation': np.std(group_data['MCAP']),
-                        'REVT mean': np.mean(group_data['REVT']),
+                        'REVT mean': np.average(group_data['NPM']),
                         'REVT median': np.median(group_data['REVT']),
                         'REVT standard deviation': np.std(group_data['REVT'])}
                 except Exception as e:
@@ -407,22 +427,90 @@ class Main():
                 Returns:
                     - Dictionary which holds information about T-test
                 """
+                def find_percentage_difference(savvy, not_savvy):
+                    """
+                    Parameters:
+                        savvy: pandas series that contains the value for a certain metric
+                        not_savvy: pandas series that contains the value for a certain metrics
+
+                    Returns:
+                        The percentage difference between the means of the two
+                    """
+                    savvy_m = np.mean(savvy)
+                    n_savvy_m = np.mean(not_savvy)
+                    avg_means = (savvy_m + n_savvy_m) / 2
+                    return ((savvy_m - n_savvy_m) / avg_means) * 100
+
                 try:
-                    roa = stats.ttest_ind(group_data['savvy_raw']['ROA'], group_data['not_savvy_raw']['ROA'], equal_var = True)
-                    roe = stats.ttest_ind(group_data['savvy_raw']['ROE'], group_data['not_savvy_raw']['ROE'], equal_var = True)
-                    npm = stats.ttest_ind(group_data['savvy_raw']['NPM'], group_data['not_savvy_raw']['NPM'], equal_var = True)
-                    mcap = stats.ttest_ind(group_data['savvy_raw']['MCAP'], group_data['not_savvy_raw']['MCAP'], equal_var = True)
-                    revt = stats.ttest_ind(group_data['savvy_raw']['REVT'], group_data['not_savvy_raw']['REVT'], equal_var = True)
-                    revc = stats.ttest_ind(group_data['savvy_raw']['REVCHANGE'], group_data['not_savvy_raw']['REVCHANGE'], equal_var = True)
+                    roa = stats.ttest_ind(group_data['savvy_raw']['ROA'], group_data['not_savvy_raw']['ROA'], equal_var = True) + (find_percentage_difference(group_data['savvy_raw']['ROA'], group_data['not_savvy_raw']['ROA']),)
+                    roe = stats.ttest_ind(group_data['savvy_raw']['ROE'], group_data['not_savvy_raw']['ROE'], equal_var = True) + (find_percentage_difference(group_data['savvy_raw']['ROE'], group_data['not_savvy_raw']['ROE']),)
+                    npm = stats.ttest_ind(group_data['savvy_raw']['NPM'], group_data['not_savvy_raw']['NPM'], equal_var = True) + (find_percentage_difference(group_data['savvy_raw']['NPM'], group_data['not_savvy_raw']['NPM']),)
+                    mcap = stats.ttest_ind(group_data['savvy_raw']['MCAP'], group_data['not_savvy_raw']['MCAP'], equal_var = True) + (find_percentage_difference(group_data['savvy_raw']['MCAP'], group_data['not_savvy_raw']['MCAP']),)
+                    revt = stats.ttest_ind(group_data['savvy_raw']['REVT'], group_data['not_savvy_raw']['REVT'], equal_var = True) + (find_percentage_difference(group_data['savvy_raw']['REVT'], group_data['not_savvy_raw']['REVT']),)
+                    revc = stats.ttest_ind(group_data['savvy_raw']['REVCHANGE'], group_data['not_savvy_raw']['REVCHANGE'], equal_var = True) + (find_percentage_difference(group_data['savvy_raw']['REVCHANGE'], group_data['not_savvy_raw']['REVCHANGE']),)
                     return {'ROA t-statistic': roa[0], 'ROA p-value': roa[1],
                             'ROE t-statistic': roe[0], 'ROE p-value': roe[1],
                             'NPM t-statistic': npm[0], 'NPM p-value': npm[1],
-                            'MCAP t-statistic': mcap[0], 'MCAP p-value': mcap[1],
-                            'REVT t-statistic': revt[0], 'REVT p-value': revt[1],
-                            'REVC t-statistic': revc[0], 'REVC p-value': revc[1],}
+                            'MCAP t-statistic': mcap[0], 'MCAP p-value': mcap[1], 
+                            'REVT t-statistic': revt[0], 'REVT p-value': revt[1], 
+                            'REVC t-statistic': revc[0], 'REVC p-value': revc[1]}
                 except:
                     return None
-                
+            
+            def create_performance(group_data: dict):
+                """
+                Parameters: 
+                    - group_data: Dictionary which holds the data for savvy and not_savvy
+
+                Returns:
+                    - Dictionary which holds weighted average percentage difference for all performance metrics 
+                """
+
+                def weighted_percent_diff(metric: str, group_data: pd.DataFrame, savvy_data: bool, top=None):
+                    """
+                    Calculates the weighted percentage difference of a certain metric (ROE, ROA, MCAP, etc..) for either savvy or not savvy
+                    """
+                    
+                    if top:
+                        # get the top % of entries in desired metric
+                        total_sorted = group_data.sort_values(by=metric, ascending=False)
+                        quantile_total = total_sorted[metric].quantile(1-top)
+                        total = total_sorted[total_sorted[metric] >= quantile_total]
+                        total_average = np.average(total[metric])
+
+                        savvy_sorted = savvy_data.sort_values(by=metric, ascending=False)
+                        savvy_quantile = savvy_sorted[metric].quantile(1-top)
+                        savvy = savvy_sorted[savvy_sorted[metric] >= savvy_quantile]
+                        savvy_average = np.average(savvy[metric])
+                    else:
+                        total_average = np.average(group_data[metric])
+                        savvy_average = np.average(savvy_data[metric])
+                    return ((savvy_average - total_average) / ((savvy_average + total_average)/2)) * 100
+
+
+                try:
+                    all_data = pd.concat([group_data['savvy_raw'], group_data['not_savvy_raw']])
+                    return {
+                        'ROE Savvy % Diff': weighted_percent_diff('ROE', all_data, group_data['savvy_raw']),
+                        'ROE Savvy % Diff (Top 25%)': weighted_percent_diff('ROE', all_data, group_data['savvy_raw'], 0.25),
+                        'ROE Not Savvy % Diff': weighted_percent_diff('ROE', all_data, group_data['not_savvy_raw']),
+                        'ROE Not Savvy % Diff (Top 25%)': weighted_percent_diff('ROE', all_data, group_data['not_savvy_raw'], 0.25),
+                        'ROA Savvy % Diff': weighted_percent_diff('ROA', all_data, group_data['savvy_raw']),
+                        'ROA Savvy % Diff (Top 25%)': weighted_percent_diff('ROA', all_data, group_data['savvy_raw'], 0.25),
+                        'ROA Not Savvy % Diff': weighted_percent_diff('ROA', all_data, group_data['not_savvy_raw']),
+                        'ROA Not Savvy % Diff (Top 25%)': weighted_percent_diff('ROA', all_data, group_data['not_savvy_raw'], 0.25),
+                        'NPM Savvy % Diff': weighted_percent_diff('NPM', all_data, group_data['savvy_raw']),
+                        'NPM Savvy % Diff (Top 25%)': weighted_percent_diff('NPM', all_data, group_data['savvy_raw'], 0.25),
+                        'NPM Not Savvy % Diff': weighted_percent_diff('NPM', all_data, group_data['not_savvy_raw']),
+                        'NPM Not Savvy % Diff (Top 25%)': weighted_percent_diff('NPM', all_data, group_data['not_savvy_raw'], 0.25),
+                        'REVC Savvy % Diff': weighted_percent_diff('REVCHANGE', all_data, group_data['savvy_raw']),
+                        'REVC Savvy % Diff (Top 25%)': weighted_percent_diff('REVCHANGE', all_data, group_data['savvy_raw'], 0.25),
+                        'REVC Not Savvy % Diff': weighted_percent_diff('REVCHANGE', all_data, group_data['not_savvy_raw']),
+                        'REVC Not Savvy % Diff (Top 25%)': weighted_percent_diff('REVCHANGE', all_data, group_data['not_savvy_raw'], 0.25),
+                    }
+                except Exception as e:
+                    print("Error occurred when making performance analysis:", e)
+
             #CALCULATE THE OVERALL STATS
             data_rep['OVERALL'] = defaultdict()
             data_rep['OVERALL']['savvy'] = create_stats_simple(savvy.dropna())
@@ -430,9 +518,13 @@ class Main():
             data_rep['OVERALL']['not_savvy'] = create_stats_simple(not_savvy.dropna())
             data_rep['OVERALL']['not_savvy_raw'] = not_savvy.dropna()
             data_rep['OVERALL']['t_stats'] = create_stats_ttest(data_rep['OVERALL'])
+            data_rep['OVERALL']['performance_avgs'] = create_performance(data_rep['OVERALL'])
 
+            # group by the first 2 digits of the NAICS code
             savvy = savvy.groupby(savvy['NAICS'].astype(str).str[:2])
             not_savvy = not_savvy.groupby(not_savvy['NAICS'].astype(str).str[:2])
+
+            # do analysis on the two different groups and store the result
             for group_name, group_data in savvy:
                 data_rep[group_name] = defaultdict()
                 data_rep[group_name]['savvy'] = create_stats_simple(group_data.dropna())
@@ -445,14 +537,16 @@ class Main():
 
             for naics_code, naics_data in data_rep.items():
                 data_rep[naics_code]['t_stats'] = create_stats_ttest(naics_data)
+                data_rep[naics_code]['performance_avgs'] = create_performance(naics_data)
                 try: del data_rep[naics_code]['savvy_raw'] 
-                except: continue
+                except: pass
                 try: del data_rep[naics_code]['not_savvy_raw']
-                except: continue
+                except: pass
             
             return data_rep
 
         df = pd.read_csv(file_path).dropna()
+        print("HEREE", len(df.index))
         data_rep = defaultdict()
         
         #filter data for savvy rows (companies only)
@@ -460,56 +554,66 @@ class Main():
         # create a boolean mask of rows which should be included
         z_scores = np.abs(stats.zscore(savvy)) < 3 
         mask = z_scores == False
-        print("Number of Outliers for savvy", mask.sum().sum())
         #apply the mask
         savvy = savvy[z_scores]
 
         not_savvy = df[df['NUM_SAVVY'] < 3]
         z_scores = np.abs(stats.zscore(not_savvy)) < 3 
         mask = z_scores == False
-        print("Number of Outliers for not_savvy", mask.sum().sum())
         not_savvy = not_savvy[z_scores]
 
         print("Total number of companies is", len(savvy.dropna().index) + len(not_savvy.dropna().index))
+        print("Total number of directors is", sum(savvy.dropna()['NUM_DIR']) + sum(not_savvy.dropna()['NUM_DIR']))
 
-        data_rep = create_final_rep(data_rep, savvy, not_savvy)
-        
-        
-        with open('result.json', 'w') as fp:
+        # create the analysis representation
+        data_rep = create_final_rep(data_rep, savvy, not_savvy, df)
+        with open('csv_files/result.json', 'w') as fp:
             json.dump(data_rep, fp, indent=2)
+        
+        # create the name list representation
+        naics_name = pd.read_csv('csv_files/cik_to_name.csv')
+        df_no_duplicates = not_savvy.drop_duplicates(subset='CIK', keep='first')
+        print(len(pd.merge(not_savvy, naics_name, on='CIK', how='inner')['COMPANY_NAME'].index))
+        print("MATCH", len(df_no_duplicates.index))
+        name_rep = {
+            'savvy_name_list': pd.merge(savvy, naics_name, on='CIK', how='inner')['COMPANY_NAME'].tolist(),
+            'not_savvy_name_list': pd.merge(not_savvy, naics_name, on='CIK', how='inner')['COMPANY_NAME'].tolist()
+        }
+        with open('csv_files/result_names.json', 'w') as fp:
+            json.dump(name_rep, fp, indent=2)
+
+    def find_names_by_cik(self, filepath: str):
+        """
+        Parameters:
+            - filepath: file path to file which contains the cik of all companies
+        
+        Outputs:
+            JSON file which contains mapping of cik's to their company name
+        """
+        df = pd.read_csv(filepath)['CIK']
+
+        res = {}
+        for ix, cik in enumerate(df):
+            cik = str(int(cik))
+            zeroes = "0" * (10-len(cik))
+            try:
+                f_url = f"https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?start_row=-1&end_row=-1&main_back=1&cik={zeroes}{cik}&company_name=&reporting_file_number=&series_id=&series_name=&class_contract_id=&class_contract_name=&state_country=NONE&city=&state_incorporation=NONE&zip_code=&last_update_from=&last_update_to=&page=summary&submit_button=View+Summary"
+                response = r.get(f_url)
+
+                #make into html object and parse text using tokenizer
+                soup = BeautifulSoup(response.text, 'lxml')
+                # Use the find method to select the element with the XPath expression
+                res[cik] = soup.find_all("table")[4].find_all("a")[0].text
+                print('Progress:', ix/len(df.index)*100)
+
+            except Exception as e:
+                print(e, "Couldn't find for cik:", cik)
+        
+        with open('csv_files/cik_to_name.json', 'w') as fp:
+            json.dump(res, fp, indent=2)
 
 
 if __name__ == '__main__':
-    None
+    Main().process_data('csv_files/final_data.csv')
 
     
-    
-
-
-
-    
-
-
-
-
-
-
-
-
-
-    
-
-
-
-    
-
-    
-    
-    
-        
-
-    
-
-
-
-

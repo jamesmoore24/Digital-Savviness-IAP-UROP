@@ -1,7 +1,2 @@
-/.vscode
-/compustat_txt_files
-/csv_files
-/Rscripts
-/unit_tests
+*/
 .env
-result.json
