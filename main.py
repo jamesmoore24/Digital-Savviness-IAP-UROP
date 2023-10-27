@@ -5,9 +5,9 @@ Hi there! This is the central file for all processes and flows used to grab, cle
 import pandas as pd
 import numpy as np
 import scipy.stats as stats
+import random
 from collections import defaultdict
 import json
-import csv
 from datetime import datetime
 import matplotlib.pyplot as plt
 
@@ -197,6 +197,23 @@ class Main():
         #print summary
         print("Excluded", excluded, "companies")
         print("Found directors list for", director_count, "companies")
+    
+    def substring_similarity(self, s, t):
+        """
+        Parameters:
+            - s is the larger string
+            - t is the proposed substring
+
+        Helper method for calculating fuzzsy matching substring percentage
+        """
+        max_similarity = 0
+
+        for i in range(len(s) - len(t) + 1):
+            substring = s[i:i + len(t)]
+            similarity = fuzz.ratio(substring, t)
+            max_similarity = max(max_similarity, similarity)
+
+        return max_similarity
 
     def get_biographies(self, cik: str, directors: str):
         """
@@ -208,6 +225,8 @@ class Main():
         Purpose:
             - For use in the calculation of tech savviness
         """
+
+        
 
         # Retrieve the DEF 14A file from the EDGAR API
         # Initialize API call
@@ -226,6 +245,14 @@ class Main():
         #get directors from string (Ex. smith john h.;doe jane r.; ...)
         #Structure looks like [[last, first], [last, first], ...]
         directors_l = []
+
+        #
+        with open('txt_files/committee_names.txt', 'r') as file:
+            # Read all lines from the file into a list
+            lines = file.readlines()
+        # Remove the newline character ('\n') from each line and create a list
+        committee_indicators = [line.rstrip('\n') for line in lines]
+
         for director in directors.split(';')[:-1]:
             #append first and last name strings into list
             directors_l.append(director.split(' ')[:2])
@@ -240,18 +267,34 @@ class Main():
                 soup = BeautifulSoup(response.text, 'html.parser')
                 #make into lowercase and tokenize text
                 parts = sent_tokenize(soup.text.lower())
+                shuffled_parts = random.sample(parts, len(parts))
                 
                 #initialize stemmer
                 stemmer = PorterStemmer()
                 
                 #dictionary used to relate director to their respective highest-ranked biography
                 director_bios = {}
-                savvy = 0
+                committees = set()
+                committees_flag = True
+
                 for director in directors_l:
                     #create list of sentences found in data structure: (sentence, rank)
                     sentence_record = []
-                    #check every part in the file
-                    for part in parts:
+                    
+                    # create counter to make sure not sampling too many parts of the document
+                    counter = 0
+                    for part in shuffled_parts:
+                        # get the commitees
+                        if committees_flag:
+                            for indicator in committee_indicators:
+                                match_ratio = self.substring_similarity(part.lower(), indicator.lower())
+                                if match_ratio == 100:
+                                    print("MATCH WITH COMMITTEE INDICATOR:", indicator, "with match ratio:", match_ratio)
+                                    committees.add(indicator)
+                                    counter += 1
+                            if counter > 10:
+                                break
+
                         #need to check for every director, flag used because director name split into first and last
                         flag_director = False
                         for name in director:
@@ -267,14 +310,18 @@ class Main():
                                     rank += clues[clue]
                             #append part with ranking and get rid of new line and non-breaking space characters
                             sentence_record.append((part.replace("\n", "").replace("\xa0", ""), rank))
-                    
+                        
                     #sort list by second value in tuple
                     sentence_record.sort(key = lambda x: x[1], reverse=True)
                     #add director name (FIRST LAST) with sentence into dictionary
                     director_bios[f"{director[1]} {director[0]}"] = sentence_record[0][0]
+                    #set committee flag to False so we don't search for committees anymore for this company
+                    committees_flag = False
 
                 #return dictionary of names and related biographies for a single company
-                return director_bios
+                committees = ';'.join([el for el in list(committees)])
+                print(director_bios)
+                return committees, director_bios
         
     def find_savvy(self, fin_data: str, most_data: str):
         """
@@ -294,42 +341,33 @@ class Main():
             lines = file.readlines()
         # Remove the newline character ('\n') from each line and create a list
         most_sig = [line.rstrip('\n') for line in lines]
-
-        stemmer = PorterStemmer()
-
+        # Dictionary to keep track of the word_frequency
         word_frequencies = defaultdict(int)
 
-        for ix, row in df.iloc[1869:, :].iterrows():
+        for ix, row in df.iterrows():
             try:
-                bios = self.get_biographies(row['CIK'], row['Directors'])
-                savvy = 0
+                committees, bios = self.get_biographies(row['CIK'], row['Directors'])
+                savvy = 0  
                 for director, bio in bios.items():
                     flag_savvy = False
-
                     for phrase in most_sig:
                         #create window with the same length as the phrase to search for the indicator phrases
-                        len_phrase = len(phrase.split(' ')) # this is the number of words in the phrase
-                        bio_l = bio.split(' ')
-                        for i in range(len(bio_l) - len_phrase):
-                            phrase_check = ' '.join(bio_l[i:i + len_phrase])
-                            match_perc = fuzz.ratio(' '.join([stemmer.stem(word) for word in phrase.lower()]), phrase_check)
-                            
-                            common_mistakes = ['each', 'echo', 'date', 'rata', 'it']
-                            if match_perc > 50 and phrase_check not in common_mistakes:
-                                # add to the total number of savvy directos and move onto the next director biography
-                                print("Matched", phrase, "with", phrase_check, "at", match_perc, "% for director", director)
-                                word_frequencies[phrase] += 1
-                                savvy += 1
-                                flag_savvy = True
-                                break
-                        
+                        match_ratio = self.substring_similarity(bio, phrase)
+                        if match_ratio > 98:
+                            print("We matched phrase", phrase, "at", match_ratio, "%")
+                            word_frequencies[phrase] += 1
+                            savvy += 1
+                            flag_savvy = True
+                            break
+                        # optimization since we've already found the director to be savvy (end early)
                         if flag_savvy:
                             break
-                    
-                print("Progress:", ix / len(df.index), "Savvy:", savvy, "/", len(row['Directors'].split(';')[:-1]))
+                
                 # need to output to database
-                df_row = pd.DataFrame([[row['CIK'], row['GVKEY'], row['NAICS'], row['MCAP'], row['REVT'], row['ROA'], row['NPM'], row['REVCHANGE'], row['ROE'], savvy, len(row['Directors'].split(';')[:-1])]], columns=['CIK', 'GVKEY', 'NAICS', 'MCAP', 'REVT', 'ROA', 'NPM', 'REVCHANGE', 'ROE', 'NUM_SAVVY', 'NUM_DIR'])
-                df_row.to_sql('savvy_final_1', self.engine, if_exists='append', index=False)
+                df_row = pd.DataFrame([[row['CIK'], row['GVKEY'], row['NAICS'], self.find_names_by_cik(row['CIK']), row['MCAP'], row['REVT'], row['ROA'], row['NPM'], row['REVCHANGE'], row['ROE'], savvy, len(row['Directors'].split(';')[:-1]), committees]], columns=['CIK', 'GVKEY', 'NAICS', 'COMPANY_NAME', 'MCAP', 'REVT', 'ROA', 'NPM', 'REVCHANGE', 'ROE', 'NUM_SAVVY', 'NUM_DIR', "COMMITTEES"])
+                df_row.to_sql('savvy_final_test', self.engine, if_exists='append', index=False)
+                print("Progress:", ix / len(df.index), "Savvy:", savvy, "/", len(row['Directors'].split(';')[:-1]))
+
             except Exception as e:
                 print("Error for", row['CIK'], e)
                 continue
@@ -577,7 +615,7 @@ class Main():
         with open('csv_files/result_names.json', 'w') as fp:
             json.dump(name_rep, fp, indent=2)
 
-    def find_names_by_cik(self, filepath: str):
+    def find_names_by_cik(self, cik):
         """
         Parameters:
             - filepath: file path to file which contains the cik of all companies
@@ -585,29 +623,38 @@ class Main():
         Outputs:
             JSON file which contains mapping of cik's to their company name
         """
-        df = pd.read_csv(filepath)['CIK']
+        cik = str(int(cik))
+        zeroes = "0" * (10-len(cik))
+        try:
+            f_url = f"https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?start_row=-1&end_row=-1&main_back=1&cik={zeroes}{cik}&company_name=&reporting_file_number=&series_id=&series_name=&class_contract_id=&class_contract_name=&state_country=NONE&city=&state_incorporation=NONE&zip_code=&last_update_from=&last_update_to=&page=summary&submit_button=View+Summary"
+            response = r.get(f_url)
 
-        res = {}
-        for ix, cik in enumerate(df):
-            cik = str(int(cik))
-            zeroes = "0" * (10-len(cik))
-            try:
-                f_url = f"https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?start_row=-1&end_row=-1&main_back=1&cik={zeroes}{cik}&company_name=&reporting_file_number=&series_id=&series_name=&class_contract_id=&class_contract_name=&state_country=NONE&city=&state_incorporation=NONE&zip_code=&last_update_from=&last_update_to=&page=summary&submit_button=View+Summary"
-                response = r.get(f_url)
+            #make into html object and parse text using tokenizer
+            soup = BeautifulSoup(response.text, 'lxml')
+            # Use the find method to select the element with the XPath expression
+            company_name = soup.find_all("table")[4].find_all("a")[0].text
+            print("Company name found!", company_name)
+            return company_name
 
-                #make into html object and parse text using tokenizer
-                soup = BeautifulSoup(response.text, 'lxml')
-                # Use the find method to select the element with the XPath expression
-                res[cik] = soup.find_all("table")[4].find_all("a")[0].text
-                print('Progress:', ix/len(df.index)*100)
-
-            except Exception as e:
-                print(e, "Couldn't find for cik:", cik)
-        
-        with open('csv_files/cik_to_name.json', 'w') as fp:
-            json.dump(res, fp, indent=2)
-
+        except Exception as e:
+            print(e, "Couldn't find for cik:", cik)
+            return "No Name"
 
 if __name__ == '__main__':
-    None
+    Main().find_savvy('csv_files/director_names.csv', 'txt_files/most_significant_indicators.txt')
+    def substring_similarity(s, t):
+        max_similarity = 0
+
+        for i in range(len(s) - len(t) + 1):
+            substring = s[i:i + len(t)]
+            similarity = fuzz.ratio(substring, t)
+            max_similarity = max(max_similarity, similarity)
+
+        return max_similarity
+
+    s = "This is a sample string to test substring similarity."
+    t = "similarity"
+
+    similarity = substring_similarity(s, t)
+    print(f"Similarity between '{t}' and a substring of '{s}' is {similarity}%")
     
