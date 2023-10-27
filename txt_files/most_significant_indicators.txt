@@ -9,7 +9,8 @@ Edge computing
 Xaas
 digital strategy
 internet of things
-platform as a service (Paas)
+platform as a service
+paas
 integrated solution
 ecosystem
 digital platform

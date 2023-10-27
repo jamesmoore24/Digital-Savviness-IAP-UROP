@@ -320,7 +320,6 @@ class Main():
 
                 #return dictionary of names and related biographies for a single company
                 committees = ';'.join([el for el in list(committees)])
-                print(director_bios)
                 return committees, director_bios
         
     def find_savvy(self, fin_data: str, most_data: str):
@@ -348,20 +347,20 @@ class Main():
             try:
                 committees, bios = self.get_biographies(row['CIK'], row['Directors'])
                 savvy = 0  
+
+                # for each director go through each phrase
+                    # if phrase matches consider that director "savvy"
+                    # need to keep seeing which phrases are included in the director biography
                 for director, bio in bios.items():
                     flag_savvy = False
                     for phrase in most_sig:
-                        #create window with the same length as the phrase to search for the indicator phrases
-                        match_ratio = self.substring_similarity(bio, phrase)
+                        match_ratio = self.substring_similarity(bio.lower(), phrase.lower())
                         if match_ratio > 98:
                             print("We matched phrase", phrase, "at", match_ratio, "%")
                             word_frequencies[phrase] += 1
-                            savvy += 1
+                            if not flag_savvy:
+                                savvy += 1
                             flag_savvy = True
-                            break
-                        # optimization since we've already found the director to be savvy (end early)
-                        if flag_savvy:
-                            break
                 
                 # need to output to database
                 df_row = pd.DataFrame([[row['CIK'], row['GVKEY'], row['NAICS'], self.find_names_by_cik(row['CIK']), row['MCAP'], row['REVT'], row['ROA'], row['NPM'], row['REVCHANGE'], row['ROE'], savvy, len(row['Directors'].split(';')[:-1]), committees]], columns=['CIK', 'GVKEY', 'NAICS', 'COMPANY_NAME', 'MCAP', 'REVT', 'ROA', 'NPM', 'REVCHANGE', 'ROE', 'NUM_SAVVY', 'NUM_DIR', "COMMITTEES"])
@@ -642,19 +641,4 @@ class Main():
 
 if __name__ == '__main__':
     Main().find_savvy('csv_files/director_names.csv', 'txt_files/most_significant_indicators.txt')
-    def substring_similarity(s, t):
-        max_similarity = 0
-
-        for i in range(len(s) - len(t) + 1):
-            substring = s[i:i + len(t)]
-            similarity = fuzz.ratio(substring, t)
-            max_similarity = max(max_similarity, similarity)
-
-        return max_similarity
-
-    s = "This is a sample string to test substring similarity."
-    t = "similarity"
-
-    similarity = substring_similarity(s, t)
-    print(f"Similarity between '{t}' and a substring of '{s}' is {similarity}%")
     
