@@ -283,17 +283,19 @@ class Main():
                     
                     # create counter to make sure not sampling too many parts of the document
                     counter = 0
-                    for part in shuffled_parts:
+                    start = time.time()
+                    for ix, part in enumerate(shuffled_parts):
                         # get the commitees
                         if committees_flag:
                             for indicator in committee_indicators:
                                 match_ratio = self.substring_similarity(part.lower(), indicator.lower())
                                 if match_ratio == 100:
-                                    print("MATCH WITH COMMITTEE INDICATOR:", indicator, "with match ratio:", match_ratio)
+                                    print("Matched", indicator)
                                     committees.add(indicator)
                                     counter += 1
-                            if counter > 10:
-                                break
+                                # update clause here since either we get through all the parts quickly, get enough committee matches or time runs out
+                                if counter > 10 or time.time() - start > 15:
+                                    committees_flag = False
 
                         #need to check for every director, flag used because director name split into first and last
                         flag_director = False
@@ -344,6 +346,7 @@ class Main():
         word_frequencies = defaultdict(int)
 
         for ix, row in df.iterrows():
+            start = time.time()
             try:
                 committees, bios = self.get_biographies(row['CIK'], row['Directors'])
                 savvy = 0  
@@ -365,7 +368,7 @@ class Main():
                 # need to output to database
                 df_row = pd.DataFrame([[row['CIK'], row['GVKEY'], row['NAICS'], self.find_names_by_cik(row['CIK']), row['MCAP'], row['REVT'], row['ROA'], row['NPM'], row['REVCHANGE'], row['ROE'], savvy, len(row['Directors'].split(';')[:-1]), committees]], columns=['CIK', 'GVKEY', 'NAICS', 'COMPANY_NAME', 'MCAP', 'REVT', 'ROA', 'NPM', 'REVCHANGE', 'ROE', 'NUM_SAVVY', 'NUM_DIR', "COMMITTEES"])
                 df_row.to_sql('savvy_final_test', self.engine, if_exists='append', index=False)
-                print("Progress:", ix / len(df.index), "Savvy:", savvy, "/", len(row['Directors'].split(';')[:-1]))
+                print("Progress:", ix / len(df.index), "Savvy:", savvy, "/", len(row['Directors'].split(';')[:-1]), "Row:", ix, "Runtime:", time.time()-start)
 
             except Exception as e:
                 print("Error for", row['CIK'], e)
@@ -641,4 +644,3 @@ class Main():
 
 if __name__ == '__main__':
     Main().find_savvy('csv_files/director_names.csv', 'txt_files/most_significant_indicators.txt')
-    
