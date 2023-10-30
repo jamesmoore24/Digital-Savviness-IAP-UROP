@@ -335,6 +335,8 @@ class Main():
             - Parse director biographies and determine which directors are savvy or not based on keywords
             - Put data into PostgreSQL database for extraction and further analysis
         """
+        start_total = time.time()
+        df_cik = pd.read_csv('csv_files/cik_to_name.csv')
         
         df = pd.read_csv(fin_data)
         with open(most_data, 'r') as file:
@@ -345,9 +347,9 @@ class Main():
         # Dictionary to keep track of the word_frequency
         word_frequencies = defaultdict(int)
 
-        for ix, row in df.iterrows():
-            start = time.time()
+        for ix, row in df.iloc[264:, :].iterrows():
             try:
+                start = time.time()
                 committees, bios = self.get_biographies(row['CIK'], row['Directors'])
                 savvy = 0  
 
@@ -366,9 +368,9 @@ class Main():
                             flag_savvy = True
                 
                 # need to output to database
-                df_row = pd.DataFrame([[row['CIK'], row['GVKEY'], row['NAICS'], self.find_names_by_cik(row['CIK']), row['MCAP'], row['REVT'], row['ROA'], row['NPM'], row['REVCHANGE'], row['ROE'], savvy, len(row['Directors'].split(';')[:-1]), committees]], columns=['CIK', 'GVKEY', 'NAICS', 'COMPANY_NAME', 'MCAP', 'REVT', 'ROA', 'NPM', 'REVCHANGE', 'ROE', 'NUM_SAVVY', 'NUM_DIR', "COMMITTEES"])
-                df_row.to_sql('savvy_final_test', self.engine, if_exists='append', index=False)
-                print("Progress:", ix / len(df.index), "Savvy:", savvy, "/", len(row['Directors'].split(';')[:-1]), "Row:", ix, "Runtime:", time.time()-start)
+                df_row = pd.DataFrame([[row['CIK'], row['GVKEY'], row['NAICS'], df_cik[df_cik['cik'] == int(row['CIK'])].iloc[0]['companyname'], row['MCAP'], row['REVT'], row['ROA'], row['NPM'], row['REVCHANGE'], row['ROE'], savvy, len(row['Directors'].split(';')[:-1]), committees]], columns=['CIK', 'GVKEY', 'NAICS', 'COMPANY_NAME', 'MCAP', 'REVT', 'ROA', 'NPM', 'REVCHANGE', 'ROE', 'NUM_SAVVY', 'NUM_DIR', "COMMITTEES"])
+                df_row.to_sql('final_savvy', self.engine, if_exists='append', index=False)
+                print("Progress:", round(ix/len(df.index)*100, 2), "Savvy:", savvy, "/", len(row['Directors'].split(';')[:-1]), "Row:", ix, "Runtime:", round(time.time()-start, 2), "seconds. Total Runtime:", round((time.time()-start_total)/60, 1), "minutes")
 
             except Exception as e:
                 print("Error for", row['CIK'], e)
@@ -587,18 +589,20 @@ class Main():
         df = pd.read_csv(file_path).dropna()
         data_rep = defaultdict()
         
-        #filter data for savvy rows (companies only)
+        # Filter data for savvy rows (companies only)
         savvy = df[df['NUM_SAVVY'] >= 3] 
-        # create a boolean mask of rows which should be included
-        z_scores = np.abs(stats.zscore(savvy)) < 3 
-        mask = z_scores == False
-        #apply the mask
-        savvy = savvy[z_scores]
+        # Create a boolean mask of rows which should be included (only measurement rows)
+        z_scores = np.abs(stats.zscore(savvy[['ROA', 'NPM', 'REVCHANGE', 'ROE']])) < 3 
+        # Create a boolean mask for rows where all z-scores are less than 3
+        row_mask = (z_scores < 3).all(axis=1)
+        # Filter the DataFrame for savvy rows (companies only)
+        savvy = savvy[row_mask]
 
+        # Do the same for not_savvy
         not_savvy = df[df['NUM_SAVVY'] < 3]
-        z_scores = np.abs(stats.zscore(not_savvy)) < 3 
-        mask = z_scores == False
-        not_savvy = not_savvy[z_scores]
+        z_scores = np.abs(stats.zscore(not_savvy[['ROA', 'NPM', 'REVCHANGE', 'ROE']])) < 3 
+        row_mask = (z_scores < 3).all(axis=1)
+        not_savvy = not_savvy[row_mask]
 
         print("Total number of companies is", len(savvy.dropna().index) + len(not_savvy.dropna().index))
         print("Total number of directors is", sum(savvy.dropna()['NUM_DIR']) + sum(not_savvy.dropna()['NUM_DIR']))
@@ -607,40 +611,8 @@ class Main():
         data_rep = create_final_rep(data_rep, savvy, not_savvy, df)
         with open('csv_files/result.json', 'w') as fp:
             json.dump(data_rep, fp, indent=2)
-        
-        # create the name list representation
-        naics_name = pd.read_csv('csv_files/cik_to_name.csv')
-        name_rep = {
-            'savvy_name_list': pd.merge(savvy, naics_name, on='CIK', how='inner')['COMPANY_NAME'].tolist(),
-            'not_savvy_name_list': pd.merge(not_savvy, naics_name, on='CIK', how='inner')['COMPANY_NAME'].tolist()
-        }
-        with open('csv_files/result_names.json', 'w') as fp:
-            json.dump(name_rep, fp, indent=2)
-
-    def find_names_by_cik(self, cik):
-        """
-        Parameters:
-            - filepath: file path to file which contains the cik of all companies
-        
-        Outputs:
-            JSON file which contains mapping of cik's to their company name
-        """
-        cik = str(int(cik))
-        zeroes = "0" * (10-len(cik))
-        try:
-            f_url = f"https://www.edgarcompany.sec.gov/servlet/CompanyDBSearch?start_row=-1&end_row=-1&main_back=1&cik={zeroes}{cik}&company_name=&reporting_file_number=&series_id=&series_name=&class_contract_id=&class_contract_name=&state_country=NONE&city=&state_incorporation=NONE&zip_code=&last_update_from=&last_update_to=&page=summary&submit_button=View+Summary"
-            response = r.get(f_url)
-
-            #make into html object and parse text using tokenizer
-            soup = BeautifulSoup(response.text, 'lxml')
-            # Use the find method to select the element with the XPath expression
-            company_name = soup.find_all("table")[4].find_all("a")[0].text
-            print("Company name found!", company_name)
-            return company_name
-
-        except Exception as e:
-            print(e, "Couldn't find for cik:", cik)
-            return "No Name"
 
 if __name__ == '__main__':
-    Main().find_savvy('csv_files/director_names.csv', 'txt_files/most_significant_indicators.txt')
+    None
+
+    
